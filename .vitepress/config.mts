@@ -1,6 +1,11 @@
 import {defineConfig} from "vitepress";
-import {nav, sidebar} from "./menu";
+import {getMenuAndNavs} from "./menu";
 
+
+const {
+  sidebar,
+  nav
+} = getMenuAndNavs("./", [".git", ".github", ".idea", ".obsidian", ".vitepress", "node_modules", "index.md"])
 export default defineConfig({
   title: "徐瀚的前端学习笔记",
   description: "一个励志成为前端大佬的学习笔记",
@@ -8,12 +13,16 @@ export default defineConfig({
     // https://vitepress.dev/reference/default-theme-config
     nav,
     sidebar,
-    socialLinks: [
-      {icon: "github", link: "https://github.com/vuejs/vitepress"},
-    ],
-    search: {
-      provider: "local",
-    },
+    socialLinks:
+      [
+        {icon: "github", link: "https://github.com/vuejs/vitepress"},
+      ],
+    search:
+      {
+        provider: "local",
+      }
+    ,
   },
-  base: "/blog/",
-});
+  base: "/blog/"
+})
+;
