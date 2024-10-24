@@ -15,5 +15,6 @@ features:
     details: 实时目标检测！
     link: /yolo/Yolov3 源码阅读笔记
   - title: WebGl 3️⃣
-    details: /three/threejs加载倾斜摄影
+    details: 三维可视化！
+    link: /three/threejs加载倾斜摄影
 ---
