@@ -1,0 +1,30 @@
+name: 打包应用并上传阿里云
+on:
+  push:
+    branches:
+      - main
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 迁出代码
+        uses: actions/checkout@main
+      - name: 安装 node 环境
+        uses: actions/setup-node@main
+        with:
+          node-version: 18.20.0
+      - name: 安装依赖
+        run: npm install
+      - name: 打包
+        run: npm run build
+      - name: 发布到阿里云
+        uses: easingthemes/ssh-deploy@main
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          ARGS: '-avzr --delete'
+          SOURCE: '.vitepress/dist/'
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          # 用户
+          REMOTE_USER: 'root'
+          # 目标地址
+          TARGET: '/root/static/blog/'
