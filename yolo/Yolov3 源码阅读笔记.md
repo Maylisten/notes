@@ -3,8 +3,8 @@
 ### 构建模型（create_modules）
 #### 模型结构与配置
 ```cfg
-[net]  
-# Testing  
+[net]  [[
+]]# Testing  
 #batch=1  
 #subdivisions=1  
 # Training  
@@ -1171,18 +1171,20 @@ def build_targets(pred_boxes, pred_cls, target, anchors, ignore_thres):
 #### IOU
 ```python
 def bbox_wh_iou(wh1, wh2):  
-    wh2 = wh2.t()  
+    wh2 = wh2.t()
     w1, h1 = wh1[0], wh1[1]  
     w2, h2 = wh2[0], wh2[1]  
+    # 最小宽 * 最小高 = 交集面积
     inter_area = torch.min(w1, w2) * torch.min(h1, h2)  
+    # 面积1 + 面积2 - 交叉面积 = 并集面积，此处 1e-16 是防止除以 0
     union_area = (w1 * h1 + 1e-16) + w2 * h2 - inter_area  
+    # 宽高 IOU = 交集面积/并集面积
     return inter_area / union_area  
   
   
 def bbox_iou(box1, box2, x1y1x2y2=True):  
-    """  
-    Returns the IoU of two bounding boxes    """    if not x1y1x2y2:  
-        # Transform from center and width to exact coordinates  
+     if not x1y1x2y2:  
+        # 获取 box1 和 box 四个顶点的坐标
         b1_x1, b1_x2 = box1[:, 0] - box1[:, 2] / 2, box1[:, 0] + box1[:, 2] / 2  
         b1_y1, b1_y2 = box1[:, 1] - box1[:, 3] / 2, box1[:, 1] + box1[:, 3] / 2  
         b2_x1, b2_x2 = box2[:, 0] - box2[:, 2] / 2, box2[:, 0] + box2[:, 2] / 2  
@@ -1192,19 +1194,22 @@ def bbox_iou(box1, box2, x1y1x2y2=True):
         b1_x1, b1_y1, b1_x2, b1_y2 = box1[:, 0], box1[:, 1], box1[:, 2], box1[:, 3]  
         b2_x1, b2_y1, b2_x2, b2_y2 = box2[:, 0], box2[:, 1], box2[:, 2], box2[:, 3]  
   
-    # get the corrdinates of the intersection rectangle  
+    # 交集长方形四个顶点坐标
     inter_rect_x1 = torch.max(b1_x1, b2_x1)  
     inter_rect_y1 = torch.max(b1_y1, b2_y1)  
     inter_rect_x2 = torch.min(b1_x2, b2_x2)  
     inter_rect_y2 = torch.min(b1_y2, b2_y2)  
-    # Intersection area  
+    
+	# 计算交集面积，clamp 是为了防止出现负数，+1 是为了至少为 1
     inter_area = torch.clamp(inter_rect_x2 - inter_rect_x1 + 1, min=0) * torch.clamp(  
         inter_rect_y2 - inter_rect_y1 + 1, min=0  
     )  
-    # Union Area  
+    
+    # 并集面积
     b1_area = (b1_x2 - b1_x1 + 1) * (b1_y2 - b1_y1 + 1)  
     b2_area = (b2_x2 - b2_x1 + 1) * (b2_y2 - b2_y1 + 1)  
-  
+
+	# 宽高 IOU = 交集面积/并集面积
     iou = inter_area / (b1_area + b2_area - inter_area + 1e-16)  
   
     return iou

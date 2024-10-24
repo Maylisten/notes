@@ -10,8 +10,10 @@ hero:
 features:
   - title: 面试题 📖
     details: 菜鸟的学习之旅！
+    link: /面试/精选
   - title: Yolo 🚀
     details: 实时目标检测！
+    link: /yolo/Yolov3 源码阅读笔记
   - title: WebGl 3️⃣
-    details: 三维可视化！
+    details: /three/threejs加载倾斜摄影
 ---
