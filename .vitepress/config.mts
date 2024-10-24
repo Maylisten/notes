@@ -15,5 +15,5 @@ export default defineConfig({
       provider: "local",
     },
   },
-  // base: "/blog/",
+  base: "/blog/",
 });
