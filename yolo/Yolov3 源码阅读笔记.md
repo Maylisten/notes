@@ -949,7 +949,7 @@ def forward(self, x, targets=None, img_dim=None):
     # 预测框的高度，以网格高度为单位
     pred_boxes[..., 3] = torch.exp(h.data) * self.anchor_h  
   
-    # 构建真实图像上输出结果
+    # 构建真实图像上输出结果，（batch_size, 检测框数量，xywhc）
     output = torch.cat(   
         (  
 	        # 乘以网格大小，得到真实图像上的 xywh
@@ -1014,6 +1014,12 @@ def compute_grid_offsets(self, grid_size, cuda=True):
 
 #### yolo 层 forward 函数（损失计算部分）
 ```python
+# iou_scores：『真实框』与最匹配的『预测框』 的 IOU
+# class_mask：类别预测是否正确，正确为 1，错误为 0  
+# obj_mask：前景（真实框对应的预测框）为 1，背景（无真实框对应的预测框）为 0
+# noobj_mask：前景（真实框对应的预测框 或 无真实框对应的预测框宽高 IOU 超过阈值）为 0，背景（无真实框对应的预测框）为 1
+# tx, ty, tw, th, 真实框的尺寸，以特征图左上角为原点，特征图网格大小为单位
+# tconf 真实框的置信度，前景（真实框对应的预测框）为 1，背景（无真实框对应的预测框）为 0
 iou_scores, class_mask, obj_mask, noobj_mask, tx, ty, tw, th, tcls, tconf = build_targets(  
 	pred_boxes=pred_boxes,  
 	pred_cls=pred_cls,  
@@ -1021,17 +1027,31 @@ iou_scores, class_mask, obj_mask, noobj_mask, tx, ty, tw, th, tcls, tconf = buil
 	anchors=self.scaled_anchors,  
 	ignore_thres=self.ignore_thres,  
 )  
-# iou_scores：真实值与最匹配的anchor的IOU得分值 class_mask：分类正确的索引  obj_mask：目标框所在位置的最好anchor置为1 noobj_mask obj_mask那里置0，还有计算的iou大于阈值的也置0，其他都为1 tx, ty, tw, th, 对应的对于该大小的特征图的xywh目标值也就是我们需要拟合的值 tconf 目标置信度  
-# Loss : Mask outputs to ignore non-existing objects (except with conf. loss)  
-loss_x = self.mse_loss(x[obj_mask], tx[obj_mask]) # 只计算有目标的  
+  
+# self.mse_loss = nn.MSELoss() 
+# self.bce_loss = nn.BCELoss()
+# self.obj_scale = 1  
+# self.noobj_scale = 100
+# 预测框和真实框中有物体的计算位置误差
+loss_x = self.mse_loss(x[obj_mask], tx[obj_mask])
 loss_y = self.mse_loss(y[obj_mask], ty[obj_mask])  
 loss_w = self.mse_loss(w[obj_mask], tw[obj_mask])  
 loss_h = self.mse_loss(h[obj_mask], th[obj_mask])  
+
+# 计算有物体置信度损失（真实框置信度为1）
 loss_conf_obj = self.bce_loss(pred_conf[obj_mask], tconf[obj_mask])   
+
+# 计算无物体的置信度损失（真实框置信度为0）
 loss_conf_noobj = self.bce_loss(pred_conf[noobj_mask], tconf[noobj_mask])  
-loss_conf = self.obj_scale * loss_conf_obj + self.noobj_scale * loss_conf_noobj #有物体越接近1越好 没物体的越接近0越好  
-loss_cls = self.bce_loss(pred_cls[obj_mask], tcls[obj_mask]) #分类损失  
-total_loss = loss_x + loss_y + loss_w + loss_h + loss_conf + loss_cls #总损失  
+
+# 置信度损失 = 有物体 + 无物体
+loss_conf = self.obj_scale * loss_conf_obj + self.noobj_scale * loss_conf_noobj
+
+# 类别损失
+loss_cls = self.bce_loss(pred_cls[obj_mask], tcls[obj_mask])  
+
+# 总损失 = 位置损失 + 置信度损失 + 类别损失
+total_loss = loss_x + loss_y + loss_w + loss_h + loss_conf + loss_cls 
 
 # Metrics  
 cls_acc = 100 * class_mask[obj_mask].mean()  
@@ -1064,7 +1084,7 @@ self.metrics = {
 
 return output, total_loss
 ```
-#### build_targets
+#### build_targets（重中之重）
 ```python
 def build_targets(pred_boxes, pred_cls, target, anchors, ignore_thres):  
 	# 用于将groundTrues格式化为方便计算损失的形式  
@@ -1087,7 +1107,7 @@ def build_targets(pred_boxes, pred_cls, target, anchors, ignore_thres):
     # 这是一个用于表示前景（包含物体）的二进制掩膜，1 为前景， 0 为后景
     # 初始化为 0 是因为大部分为后景，后续只需要将前景设置为 1 
     obj_mask = ByteTensor(nB, nA, nG, nG).fill_(0)
-     # 这是一个用于表示前景（包含物体）的二进制掩膜，1 为后景， 1 为前景
+    # 这是一个用于表示前景（包含物体）的二进制掩膜，1 为后景， 1 为前景
     # 初始化为 1 是因为大部分为后景，后续只需要将前景设置为 0 
     noobj_mask = ByteTensor(nB, nA, nG, nG).fill_(1) 
     # 这是一个用于表示分类是否正确的掩膜  
@@ -1116,7 +1136,7 @@ def build_targets(pred_boxes, pred_cls, target, anchors, ignore_thres):
     gxy = target_boxes[:, :2]
     # 截取 wh
     gwh = target_boxes[:, 2:]  
-    # 计算每个锚框和每个预测框之间的『宽高iou』
+    # 计算每个锚框和每个预测框之间的『宽高iou』 
     ious = torch.stack([bbox_wh_iou(anchor, gwh) for anchor in anchors])  
     # 计算得到每个真实框对应（iou 最大）的『预测框索引』以及 iou 大小
     best_ious, best_n = ious.max(0)
@@ -1184,13 +1204,13 @@ def bbox_wh_iou(wh1, wh2):
   
 def bbox_iou(box1, box2, x1y1x2y2=True):  
      if not x1y1x2y2:  
-        # 获取 box1 和 box 四个顶点的坐标
+        # 输入格式为 xywh，获取 box1 和 box 四个顶点的坐标
         b1_x1, b1_x2 = box1[:, 0] - box1[:, 2] / 2, box1[:, 0] + box1[:, 2] / 2  
         b1_y1, b1_y2 = box1[:, 1] - box1[:, 3] / 2, box1[:, 1] + box1[:, 3] / 2  
         b2_x1, b2_x2 = box2[:, 0] - box2[:, 2] / 2, box2[:, 0] + box2[:, 2] / 2  
         b2_y1, b2_y2 = box2[:, 1] - box2[:, 3] / 2, box2[:, 1] + box2[:, 3] / 2  
     else:  
-        # Get the coordinates of bounding boxes  
+        # 输入格式为 x1y1x2y2，获取 box1 和 box 四个顶点的坐标
         b1_x1, b1_y1, b1_x2, b1_y2 = box1[:, 0], box1[:, 1], box1[:, 2], box1[:, 3]  
         b2_x1, b2_y1, b2_x2, b2_y2 = box2[:, 0], box2[:, 1], box2[:, 2], box2[:, 3]  
   
@@ -1215,3 +1235,262 @@ def bbox_iou(box1, box2, x1y1x2y2=True):
     return iou
 ```
 ## 训练
+```python
+# 多线程时必须加上 __name__ 的判断
+if __name__ == "__main__":  
+	# 获取一些参数
+    parser = argparse.ArgumentParser()  
+    parser.add_argument("--epochs", type=int, default=100, help="number of epochs")  
+    parser.add_argument("--batch_size", type=int, default=4, help="size of each image batch")  
+    parser.add_argument("--gradient_accumulations", type=int, default=2, help="number of gradient accums before step")  
+    parser.add_argument("--model_def", type=str, default="config/yolov3.cfg", help="path to model definition file")  
+    parser.add_argument("--data_config", type=str, default="config/coco.data", help="path to data config file")  
+    parser.add_argument("--pretrained_weights", type=str, help="if specified starts from checkpoint model")  
+    parser.add_argument("--n_cpu", type=int, default=0, help="number of cpu threads to use during batch generation")  
+    parser.add_argument("--img_size", type=int, default=416, help="size of each image dimension")  
+    parser.add_argument("--checkpoint_interval", type=int, default=1, help="interval between saving model weights")  
+    parser.add_argument("--evaluation_interval", type=int, default=1, help="interval evaluations on validation set")  
+    parser.add_argument("--compute_map", default=False, help="if True computes mAP every tenth batch")  
+    parser.add_argument("--multiscale_training", default=True, help="allow for multi-scale training")  
+    opt = parser.parse_args()  
+    print(opt)  
+  
+    logger = Logger("logs")  
+
+	# 获取设备，这时还没有 mps
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  
+
+	# 输出文件夹
+    os.makedirs("output", exist_ok=True)  
+    # 训练断点输出的权重文件夹
+    os.makedirs("checkpoints", exist_ok=True)  
+  
+    # 获取数据的位置
+    data_config = parse_data_config(opt.data_config)  
+    # 获取训练集的位置
+    train_path = data_config["train"]  
+    # 获取测试集的位置
+    valid_path = data_config["valid"]  
+    # 获取标签下标对应的具体名称
+    class_names = load_classes(data_config["names"])  
+  
+    # 初始化模型
+    model = Darknet(opt.model_def).to(device)  
+    # 
+    model.apply(weights_init_normal)  
+  
+    # 从断点开始继续训练 
+    if opt.pretrained_weights:  
+        if opt.pretrained_weights.endswith(".pth"):  
+            model.load_state_dict(torch.load(opt.pretrained_weights))  
+        else:  
+            model.load_darknet_weights(opt.pretrained_weights)  
+  
+    # 自定义的 dataset
+    dataset = ListDataset(train_path, augment=True, multiscale=opt.multiscale_training)  
+    dataloader = torch.utils.data.DataLoader(  
+        dataset,  
+        batch_size=opt.batch_size,  
+        shuffle=True,  
+        num_workers=opt.n_cpu,  
+        pin_memory=True,  
+        collate_fn=dataset.collate_fn,  
+    )  
+  
+    optimizer = torch.optim.Adam(model.parameters())  
+  
+    metrics = [  
+        "grid_size",  
+        "loss",  
+        "x",  
+        "y",  
+        "w",  
+        "h",  
+        "conf",  
+        "cls",  
+        "cls_acc",  
+        "recall50",  
+        "recall75",  
+        "precision",  
+        "conf_obj",  
+        "conf_noobj",  
+    ]  
+
+	# 开始训练
+    for epoch in range(opt.epochs):  
+        model.train()  
+        start_time = time.time()  
+        for batch_i, (_, imgs, targets) in enumerate(dataloader):  
+	        # 已经完成的总训练批次
+            batches_done = len(dataloader) * epoch + batch_i  
+			# 将数据转到对应的设备上
+            imgs = Variable(imgs.to(device))  
+            targets = Variable(targets.to(device), requires_grad=False)  
+            print ('imgs',imgs.shape)  
+            print ('targets',targets.shape)  
+            # 模型 forward 得到损失和输出
+            loss, outputs = model(imgs, targets)  
+            # 反向传播
+            loss.backward()  
+			# 累计 n 次梯度后，再进行更新，默认为 2
+            if batches_done % opt.gradient_accumulations:  
+                optimizer.step()  
+                optimizer.zero_grad()  
+  
+            # 打印进度和指标
+            # ......
+  
+            model.seen += imgs.size(0)  
+
+		# 评估模型
+        if epoch % opt.evaluation_interval == 0:  
+            print("\n---- Evaluating Model ----")  
+            precision, recall, AP, f1, ap_class = evaluate(  
+                model,  
+                path=valid_path,  
+                iou_thres=0.5,  
+                conf_thres=0.5,  
+                nms_thres=0.5,  
+                img_size=opt.img_size,  
+                batch_size=8,  
+            )  
+            evaluation_metrics = [  
+                ("val_precision", precision.mean()),  
+                ("val_recall", recall.mean()),  
+                ("val_mAP", AP.mean()),  
+                ("val_f1", f1.mean()),  
+            ]  
+            logger.list_of_scalars_summary(evaluation_metrics, epoch)  
+  
+            # Print class APs and mAP  
+            ap_table = [["Index", "Class name", "AP"]]  
+            for i, c in enumerate(ap_class):  
+                ap_table += [[c, class_names[c], "%.5f" % AP[i]]]  
+            print(AsciiTable(ap_table).table)  
+            print(f"---- mAP {AP.mean()}")  
+            
+		# 每轮保存一下训练的结果
+        if epoch % opt.checkpoint_interval == 0:  
+            torch.save(model.state_dict(), f"checkpoints/yolov3_ckpt_%d.pth" % epoch)
+```
+
+## 检测
+#### detect.py
+```python
+if __name__ == "__main__":  
+    parser = argparse.ArgumentParser()  
+    parser.add_argument("--image_folder", type=str, default="data/samples", help="path to dataset")  
+    parser.add_argument("--model_def", type=str, default="config/yolov3.cfg", help="path to model definition file")  
+    parser.add_argument("--weights_path", type=str, default="weights/yolov3.weights", help="path to weights file")  
+    parser.add_argument("--class_path", type=str, default="data/coco.names", help="path to class label file")  
+    parser.add_argument("--conf_thres", type=float, default=0.8, help="object confidence threshold")  
+    parser.add_argument("--nms_thres", type=float, default=0.4, help="iou thresshold for non-maximum suppression")  
+    parser.add_argument("--batch_size", type=int, default=1, help="size of the batches")  
+    parser.add_argument("--n_cpu", type=int, default=0, help="number of cpu threads to use during batch generation")  
+    parser.add_argument("--img_size", type=int, default=416, help="size of each image dimension")  
+    parser.add_argument("--checkpoint_model", type=str, help="path to checkpoint model")  
+    opt = parser.parse_args()  
+    print(opt)  
+  
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  
+  
+    os.makedirs("output", exist_ok=True)  
+  
+    # 初始化模型
+    model = Darknet(opt.model_def, img_size=opt.img_size).to(device)  
+  
+    if opt.weights_path.endswith(".weights"):  
+        # Load darknet weights  
+        model.load_darknet_weights(opt.weights_path)  
+    else:  
+        # Load checkpoint weights  
+        model.load_state_dict(torch.load(opt.weights_path))  
+  
+    model.eval()
+
+	# 测试数据 loader，对图片填充成了正方形，并且 resize 大小
+    dataloader = DataLoader(  
+        ImageFolder(opt.image_folder, img_size=opt.img_size),  
+        batch_size=opt.batch_size,  
+        shuffle=False,  
+        num_workers=opt.n_cpu,  
+    )
+      
+	# 获取 label 对应的文本
+    classes = load_classes(opt.class_path) 
+  
+    Tensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor  
+
+	# 存储检测图片路径 
+    imgs = []  
+    # 存储检测结果 
+    img_detections = [] 
+  
+    print("\nPerforming object detection:")  
+    prev_time = time.time()  
+    for batch_i, (img_paths, input_imgs) in enumerate(dataloader):  
+        input_imgs = Variable(input_imgs.type(Tensor))  
+    
+        with torch.no_grad():  
+	        # 检测结果
+            detections = model(input_imgs)  
+            # 非极大值抑制
+            detections = non_max_suppression(detections, opt.conf_thres, opt.nms_thres)  
+  
+        # 保存图片路径和检测结果  
+        imgs.extend(img_paths)  
+        img_detections.extend(detections)  
+  
+	# 绘制检测框，输出带有检测框的图片
+	# ......
+```
+
+#### 非极大值抑制（non_max_suppression）
+```python
+# 移除低于 'conf_thres' 的目标置信度分数的检测，并执行非极大值抑制以进一步过滤检测。
+# 返回output：[(预测框的数量，(x1+y1+x2+y2+object_conf+class_conf+class_pred))] (长度为 batch_size 的数组)
+
+def non_max_suppression(prediction, conf_thres=0.5, nms_thres=0.4):  
+	# prediction:（barch_size, 原始预测框数量, 类别+ xywhc）
+    # (center x, center y, width, height) 转为 (x1, y1, x2, y2)    
+    prediction[..., :4] = xywh2xyxy(prediction[..., :4]) 
+    #  
+    output = [None for _ in range(len(prediction))]  
+    for image_i, image_pred in enumerate(prediction):  
+        # 过滤掉置信度低于阈值的预测框
+        image_pred = image_pred[image_pred[:, 4] >= conf_thres]  
+        # 没有剩下的预测框则跳过后续步骤
+        if not image_pred.size(0):  
+            continue  
+        # 预测框的综合得分 =  执行度 * 类别概率
+        score = image_pred[:, 4] * image_pred[:, 5:].max(1)[0]  
+        # 按照分数将剩下的预测框从大到小排序 
+        image_pred = image_pred[(-score).argsort()]  
+        # class_confs 是每个检测框的最大类别置信度，class_preds 是预测类别（最大类别置信度的 index）
+        class_confs, class_preds = image_pred[:, 5:].max(1, keepdim=True)  
+        # 合并结果, detections 的 shape 为 (x1, y1, x2, y2, object_conf, class_conf, class_pred)
+        detections = torch.cat((image_pred[:, :5], class_confs.float(), class_preds.float()), 1)  
+      
+        keep_boxes = []  
+        while detections.size(0):  
+	        # 计算第一个（分数最大的）与其余预测框的 IOU，得到 IOU 大于阈值的掩膜
+            large_overlap = bbox_iou(detections[0, :4].unsqueeze(0), detections[:, :4]) > nms_thres  
+            # 计算第一个（分数最大的）与其余预测框的预测类别是否相等的掩膜
+            label_match = detections[0, -1] == detections[:, -1]  
+            # 综合两个掩膜得到是否需要极大值抑制的掩膜  
+            invalid = large_overlap & label_match  
+            # 得到被抑制的预测框以及对应的置信度（作为权重）
+            weights = detections[invalid, 4:5]  
+            # 融合这些标签相同且 IOU 超过阈值的预测框的 xywh,计算加权平均值
+            detections[0, :4] = (weights * detections[invalid, :4]).sum(0) / weights.sum() 
+            #  结果中加上融合过后的预测结果
+            keep_boxes += [detections[0]]  
+            # 去除掉融合过的
+            detections = detections[~invalid]  
+            
+	    # 如果有结果，则加入到输出结果中
+        if keep_boxes:  
+            output[image_i] = torch.stack(keep_boxes)  
+  
+    return output
+```
