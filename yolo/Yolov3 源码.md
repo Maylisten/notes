@@ -1,4 +1,4 @@
-# Yolov3 源码阅读笔记
+# Yolov3 源码
 ## Darknet模型
 ### 构建模型（create_modules）
 #### 模型结构与配置
