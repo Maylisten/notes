@@ -10,7 +10,7 @@ https://docs.docker.com/desktop/install/mac-install/
 
 ## Centos7安装
 
-```shel
+```shell
 # 检查内核， 需要在3.8以上
 uname -a
 
