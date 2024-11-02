@@ -2,7 +2,7 @@
 ## Darknet模型
 ### 构建模型（create_modules）
 #### 模型结构与配置
-```cfg
+```
 [net]  [[
 ]]# Testing  
 #batch=1  
