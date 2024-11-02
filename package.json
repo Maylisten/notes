@@ -14,6 +14,7 @@
   "license": "ISC",
   "devDependencies": {
     "@types/node": "^22.7.9",
+    "markdown-it-mathjax3": "^4.3.2",
     "vite": "^5.4.10",
     "vite-plugin-vitepress-auto-nav": "^3.0.0",
     "vitepress": "^1.4.1"
