@@ -518,6 +518,7 @@ class LoadImagesAndLabels(Dataset):
 
 ## 模型
 ###  模型结构
+![image.png](https://gitee.com/may1234/md-imgs/raw/master/202411010944837.png)
 ```yaml
 # parameters  
 nc: 2  # number of classes  
@@ -902,45 +903,421 @@ class Model(nn.Module):
         if profile:  
             print('%.1fms total' % sum(dt))  
         return x  
+```
+## 训练
+#### train
+```python
+def train(hyp, opt, device, tb_writer=None):  
+	# 打印超参
+    logger.info(f'Hyperparameters {hyp}') 
+    # 输出文件夹
+    log_dir = Path(tb_writer.log_dir) if tb_writer else Path(opt.logdir) / 'evolve' 
+	# 训练权重输出的文件夹
+    wdir = log_dir / 'weights'
+    # 训练结果保存路径
+    os.makedirs(wdir, exist_ok=True) 
+    # 最新训练结果的路径
+    last = wdir / 'last.pt'  
+    # 最好训练结果的路径
+    best = wdir / 'best.pt'  
+    # 训练过程中各种指标
+    results_file = str(log_dir / 'results.txt')   
+    # 轮数、批次大小、总批次、预训练权重、分布式
+    epochs, batch_size, total_batch_size, weights, rank = \  
+        opt.epochs, opt.batch_size, opt.total_batch_size, opt.weights, opt.global_rank  
   
-    def _initialize_biases(self, cf=None):  
-        # initialize biases into Detect(), cf is class frequency  
-        # cf = torch.bincount(torch.tensor(np.concatenate(dataset.labels, 0)[:, 0]).long(), minlength=nc) + 1.        with torch.no_grad():  
-            m = self.model[-1]  # Detect() module  
-            for mi, s in zip(m.m, m.stride):  # from  
-                b = mi.bias.view(m.na, -1)  # conv.bias(255) to (3,85)  
-                b[:, 4] += math.log(8 / (640 / s) ** 2)  # obj (8 objects per 640 image)  
-                b[:, 5:] += math.log(0.6 / (m.nc - 0.99)) if cf is None else torch.log(cf / cf.sum())  # cls  
-                mi.bias = torch.nn.Parameter(b.view(-1), requires_grad=True)  
+    # 保存超参
+    with open(log_dir / 'hyp.yaml', 'w') as f:  
+        yaml.dump(hyp, f, sort_keys=False)  
+    with open(log_dir / 'opt.yaml', 'w') as f:  
+        yaml.dump(vars(opt), f, sort_keys=False)  
   
-    def _print_biases(self):  
-        m = self.model[-1]  # Detect() module  
-        for mi in m.m:  # from  
-            b = mi.bias.detach().view(m.na, -1).T  # conv.bias(255) to (3,85)  
-            print(('%6g Conv2d.bias:' + '%10.3g' * 6) % (mi.weight.shape[1], *b[:5].mean(1).tolist(), b[5:].mean()))  
+    # 设置 cuda | cpu
+    cuda = device.type != 'cpu'  
+    # 随机种子  
+    init_seeds(2 + rank) 
+    # 读取数据集的位置
+    with open(opt.data) as f:  
+        data_dict = yaml.load(f, Loader=yaml.FullLoader)
+    # 所有进程都一起  
+    with torch_distributed_zero_first(rank):
+	    # 检查数据集  
+        check_dataset(data_dict) 
+    # 训练数据集位置
+    train_path = data_dict['train']  # 数据路径与类别名字  
+    # 测试数据集位置
+    test_path = data_dict['val']  
+    # nc：预测类别的数量
+    # name: 类别对应的标签
+    nc, names = (1, ['item']) if opt.single_cls else (int(data_dict['nc']), data_dict['names'])
+    # 断言检查类别对应的标签数量是否和需要检测的类别数量相同
+    assert len(names) == nc, '%g names found for nc=%g dataset in %s' % (len(names), nc, opt.data)  
+    # 检查预训练模型是否是.pt
+    pretrained = weights.endswith('.pt')  
+    # 有预训练模型的话，会自动下载，最好在github下载好 然后放到对应位置  
+    if pretrained:  
+	    # 分布式环境下保证顺序下载文件
+        with torch_distributed_zero_first(rank):  
+	        # 尝试从指定地址下载文件
+            attempt_download(weights) 
+        # 加载 checkpoint，包含 训练的轮数、模型结构、训练参数等
+        ckpt = torch.load(weights, map_location=device) 
+        if hyp.get('anchors'): 
+	        # 如果配置文件中有锚框 (anchors) 参数，强制将预训练权重的 anchors 参数更新为当前设定的 hyp['anchors']
+            ckpt['model'].yaml['anchors'] = round(hyp['anchors'])
+        # 构建模型
+        model = Model(opt.cfg or ckpt['model'].yaml, ch=3, nc=nc).to(device)
+        # 需要排除的模型参数
+        exclude = ['anchor'] if opt.cfg or hyp.get('anchors') else [] 
+        # 模型参数转为浮点字典
+        state_dict = ckpt['model'].float().state_dict()
+        # 提取模型需要使用的公共参数，并排除掉一些键值
+        state_dict = intersect_dicts(state_dict, model.state_dict(), exclude=exclude)  # intersect  
+        # 模型加载参数
+        model.load_state_dict(state_dict, strict=False) 
+        # 打印
+        logger.info('Transferred %g/%g items from %s' % (len(state_dict), len(model.state_dict()), weights))
+    else:  
+	    # 没有预训练直接构建模型
+        model = Model(opt.cfg, ch=3, nc=nc).to(device)  # create 就是咱们之前讲的创建模型那块  
   
-    # def _print_weights(self):  
-    #     for m in self.model.modules():    #         if type(m) is Bottleneck:    #             print('%10.3g' % (m.w.detach().sigmoid() * 2))  # shortcut weights  
-    def fuse(self):  # fuse model Conv2d() + BatchNorm2d() layers  
-        print('Fusing layers... ')  
-        for m in self.model.modules():  
-            if type(m) is Conv and hasattr(m, 'bn'):  
-                m._non_persistent_buffers_set = set()  # pytorch 1.6.0 compatability  
-                m.conv = fuse_conv_and_bn(m.conv, m.bn)  # update conv  
-                delattr(m, 'bn')  # remove batchnorm  
-                m.forward = m.fuseforward  # update forward  
-        self.info()  
-        return self  
+    # 累计多少张图片更新一次模型 
+    nbs = 64 
+    # 累计多少批次更新一次模型 
+    accumulate = max(round(nbs / total_batch_size), 1)
+    
+    hyp['weight_decay'] *= total_batch_size * accumulate / nbs  # scale weight_decay  
+
+	# 创建三个空列表，用于存储不同类型的参数
+	pg0, pg1, pg2 = [], [], []
+	# 遍历模型中的所有参数
+    for k, v in model.named_parameters():  
+		# 设置参数为可训练
+        v.requires_grad = True  
+        # 如果参数名包含'.bias'，表示偏置项，将偏置项添加到pg2列表中
+        if '.bias' in k:  
+            pg2.append(v)
+        elif '.weight' in k and '.bn' not in k:  
+		    # 如果是卷积或全连接层的权重（不包含批归一化的权重），将此类权重添加到pg1列表
+            pg1.append(v)
+        else:  
+	        # 其他参数（包括批归一化的权重）添加到pg0列表
+            pg0.append(v)
+
+	# 根据配置，创建 adam 或 sgd 学习率优化器
+    if opt.adam:
+        optimizer = optim.Adam(pg0, lr=hyp['lr0'], betas=(hyp['momentum'], 0.999))  
+    else:  
+        optimizer = optim.SGD(pg0, lr=hyp['lr0'], momentum=hyp['momentum'], nesterov=True)  
+
+	# 添加 pg1，施加权重衰减
+    optimizer.add_param_group({'params': pg1, 'weight_decay': hyp['weight_decay']})
+    # 添加 pg2，不施加权重衰减
+    optimizer.add_param_group({'params': pg2})
+    logger.info('Optimizer groups: %g .bias, %g conv.weight, %g other' % (len(pg2), len(pg1), len(pg0)))  
+    del pg0, pg1, pg2  
   
-    def add_nms(self):  # fuse model Conv2d() + BatchNorm2d() layers  
-        if type(self.model[-1]) is not NMS:  # if missing NMS  
-            print('Adding NMS module... ')  
-            m = NMS()  # module  
-            m.f = -1  # from  
-            m.i = self.model[-1].i + 1  # index  
-            self.model.add_module(name='%s' % m.i, module=m)  # add  
-        return self  
+    # 通过余弦退火的方法使学习率在训练的不同阶段逐渐下降
+    lf = lambda x: ((1 + math.cos(x * math.pi / epochs)) / 2) * (1 - hyp['lrf']) + hyp['lrf']
+    scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)  
+    # plot_lr_scheduler(optimizer, scheduler, epochs)  
   
-    def info(self, verbose=False):  # print model information  
-        model_info(self, verbose)
+    # best_fitness是sum([0.0, 0.0, 0.1, 0.9]*[精确度, 召回率, mAP@0.5, mAP@0.5:0.95])  
+    # 相当于一个综合指标来判断每一次的得分  
+    start_epoch, best_fitness = 0, 0.0  
+
+	# 加载预训练模型，恢复训练状态
+    if pretrained:  
+        if ckpt['optimizer'] is not None:  
+            # 设置优化器
+            optimizer.load_state_dict(ckpt['optimizer']) 
+	        # checkpoint 中的最佳 fitness 值 
+            best_fitness = ckpt['best_fitness']  
+            
+        if ckpt.get('training_results') is not None:  
+            with open(results_file, 'w') as file:  
+                file.write(ckpt['training_results'])  # write results.txt  
+  
+        start_epoch = ckpt['epoch'] + 1  
+        if opt.resume:
+            assert start_epoch > 0, '%s training to %g epochs is finished, nothing to resume.' % (weights, epochs)  
+            shutil.copytree(wdir, wdir.parent / f'weights_backup_epoch{start_epoch - 1}')
+        if epochs < start_epoch:
+	        # 若设置的 epoch 小于模型已经训练的轮数，就再训练 epoch 轮
+            logger.info('%s has been trained for %g epochs. Fine-tuning for %g additional epochs.' %  
+                        (weights, ckpt['epoch'], epochs))  
+            epochs += ckpt['epoch']
+  
+        del ckpt, state_dict  
+  
+    # 总的下采样比例（ grid size ）
+    gs = int(max(model.stride))
+    # 看数据的大小能不能整除这个比例   
+    imgsz, imgsz_test = [check_img_size(x, gs) for x in opt.img_size]
+  
+    # DP mode 如果你的机器里面有过个GPU，需要改一些参数  
+    if cuda and rank == -1 and torch.cuda.device_count() > 1:  
+        model = torch.nn.DataParallel(model)  
+  
+    # SyncBatchNorm 多卡同步做BN
+    if opt.sync_bn and cuda and rank != -1:  
+        model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model).to(device)  
+        logger.info('Using SyncBatchNorm()')  
+  
+    # Exponential moving average 滑动平均能让参数更新的更平滑一点不至于波动太大    
+    ema = ModelEMA(model) if rank in [-1, 0] else None  
+  
+    # DDP mode 多机多卡，有时候DP可能会出现负载不均衡，这个能直接解决该问题
+    if cuda and rank != -1:  
+        model = DDP(model, device_ids=[opt.local_rank], output_device=opt.local_rank)  
+  
+    # 创建 dataloader
+    dataloader, dataset = create_dataloader(train_path, imgsz, batch_size, gs, opt,  
+                                            hyp=hyp, augment=True, cache=opt.cache_images, rect=opt.rect,  
+                                            rank=rank, world_size=opt.world_size, workers=opt.workers)  
+    # mlc 为标签中的展现的类别总数                                    
+    mlc = np.concatenate(dataset.labels, 0)[:, 0].max()
+    # 批次总数
+    nb = len(dataloader) 
+    # 检查 grandtruth 中的 label种类是否小于期望检测的种类
+    assert mlc < nc, 'Label class %g exceeds nc=%g in %s. Possible class labels are 0-%g' % (mlc, nc, opt.data, nc - 1)  
+  
+    # 主进程执行 
+    if rank in [-1, 0]:  
+	    # set EMA updates
+        ema.updates = start_epoch * nb // accumulate    
+        # 测试数据集
+		testloader = create_dataloader(test_path, imgsz_test, total_batch_size, gs, opt,  
+                                       hyp=hyp, augment=False, cache=opt.cache_images and not opt.notest, rect=True,  
+                                       rank=-1, world_size=opt.world_size, workers=opt.workers)[0] 
+		# 若是从头开始训练时执行
+        if not opt.resume:  
+	        # 获取训练集的 labels
+            labels = np.concatenate(dataset.labels, 0)  
+            # 获取各个 label 的类别
+            c = torch.tensor(labels[:, 0]) 
+            # 绘制并保存类别分布图
+            plot_labels(labels, save_dir=log_dir)  
+            # TensorBoard 相关数据可视化
+            if tb_writer:  
+                tb_writer.add_histogram('classes', c, 0)  
+  
+            # 自动检查并调整 YOLO 模型的锚框（anchor boxes），使其更适合当前的数据集
+            if not opt.noautoanchor:  
+                check_anchors(dataset, model=model, thr=hyp['anchor_t'], imgsz=imgsz)  
+  
+    # 分类损失的初始权重，hyp['cls'] 的值会被乘以 (nc / 80)，以便在不同类别数的数据集上合理适配分类损失的权重  
+    hyp['cls'] *= nc / 80. 
+    # 模型中的类别数量
+    model.nc = nc
+    # 模型的超参数
+    model.hyp = hyp
+    # 目标损失（obj_loss）与 IoU 损失的比重  
+    model.gr = 1.0
+    # 根据标签设置各类别数据初始权重  
+    model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device)
+    # 标签类别的名称
+    model.names = names  
+  
+    # 开始训练
+    # 记录时间
+    t0 = time.time()  
+    # 热身的步数，防止开始学习率过大，至少 1000 步
+    nw = max(round(hyp['warmup_epochs'] * nb), 1e3) 
+    # 每个类别的 map（平均精度） 
+    maps = np.zeros(nc)
+    # 精确率, 召回率, mAP@.5, mAP@.5-.95, val_loss(box）,val_loss(obj), val_loss(cls) 
+    results = (0, 0, 0, 0, 0, 0, 0)
+    # 设置学习率调度器的初始步数
+    scheduler.last_epoch = start_epoch - 1   
+    # 混合精度训练 
+    scaler = amp.GradScaler(enabled=cuda)  
+    # 打印信息   
+    logger.info('Image sizes %g train, %g test\n'  
+                'Using %g dataloader workers\nLogging results to %s\n'  
+                'Starting training for %g epochs...' % (imgsz, imgsz_test, dataloader.num_workers, log_dir, epochs))
+
+	# 开始训练
+    for epoch in range(start_epoch, epochs):
+	    # 模型进入训练状态 
+        model.train()  
+  
+        # 是否要使用图像的权重
+        if opt.image_weights:   
+            if rank in [-1, 0]:  
+	            # 类别的权重，labels 中出现次数越少，权重就高
+                cw = model.class_weights.cpu().numpy() * (1 - maps) ** 2  
+                # 各个图片的权重，图片中对应的 labels 类别加权求和得到权重
+                iw = labels_to_image_weights(dataset.labels, nc=nc, class_weights=cw)
+                # 随机的索引，按照权重有放回的采样，权重高的很容易被多次拿到
+                dataset.indices = random.choices(range(dataset.n), weights=iw, k=dataset.n)
+            # 分布式环境下同步 indices            、
+            if rank != -1:  
+                indices = (torch.tensor(dataset.indices) if rank == 0 else torch.zeros(dataset.n)).int()  
+                dist.broadcast(indices, 0)  
+                if rank != 0:  
+                    dataset.indices = indices.cpu().numpy()  
+        
+        # 初始化损失
+        mloss = torch.zeros(4, device=device)
+        # DDP模式每次取数据的随机种子都不同
+        if rank != -1:
+            dataloader.sampler.set_epoch(epoch)  
+        # 创建进度条  
+        pbar = enumerate(dataloader)  
+        logger.info(('\n' + '%10s' * 8) % ('Epoch', 'gpu_mem', 'box', 'obj', 'cls', 'total', 'targets', 'img_size'))  
+        if rank in [-1, 0]:  
+            pbar = tqdm(pbar, total=nb)  # progress bar  
+        # 
+        optimizer.zero_grad()  
+        for i, (imgs, targets, paths, _) in pbar:
+	        # imgs: 图像
+	        # targets: 标签
+	        # paths:图像路径
+	        # 记录当前经过的 batch 数量，用于控制 warm-up 期间的学习率和动量。
+            ni = i + nb * epoch
+            # 图像归一化  
+            imgs = imgs.to(device, non_blocking=True).float() / 255.0  # uint8 to float32, 0-255 to 0.0-1.0  
+  
+            # Warmup 热身
+            # 前 nw 个 batch 中进行 warm-up。  
+            if ni <= nw:  
+                xi = [0, nw]  # x interp  
+                # model.gr = np.interp(ni, xi, [0.0, 1.0])  
+                # iou loss ratio (obj_loss = 1.0 or iou)     
+                # 控制梯度累积次数
+                # np.interp 用线性插值计算 accumulate 的值，以便在 warm-up 阶段逐渐增加
+                accumulate = max(1, np.interp(ni, xi, [1, nbs / total_batch_size]).round())  
+                # 根据当前的 batch 数量 ni 计算每个参数组的学习率和动量，使其逐渐过渡到预设的初始学习率和动量
+                for j, x in enumerate(optimizer.param_groups):    
+                    x['lr'] = np.interp(ni, xi, [hyp['warmup_bias_lr'] if j == 2 else 0.0, x['initial_lr'] * lf(epoch)])  
+                    if 'momentum' in x:  
+                        x['momentum'] = np.interp(ni, xi, [hyp['warmup_momentum'], hyp['momentum']])  
+  
+            # Multi-scale 各种输入的大小
+            if opt.multi_scale:  
+	            # 图像尺寸随机缩放，范围是[imgsz * 0.5, imgsz * 1.5]
+	            # gs 是最终特征图一个网格的大小， //gs * gs 保证图片大小是 gs 的整数倍
+                sz = random.randrange(imgsz * 0.5, imgsz * 1.5 + gs) // gs * gs
+                # scale 比例  
+                sf = sz / max(imgs.shape[2:]) 
+                if sf != 1:  # 得到新的输入大小  
+	                # 得到图片缩放后的真实大小
+	                ns = [math.ceil(x * sf / gs) * gs for x in imgs.shape[2:]]  
+	                # 以新尺寸 ns 重采样图像
+                    imgs = F.interpolate(imgs, size=ns, mode='bilinear', align_corners=False)  
+  
+            # 向前传播 
+            with amp.autocast(enabled=cuda): 
+	            # 预测值，三张不同尺寸的特征图
+                pred = model(imgs)
+                # 总损失，（分类损失，回归损失，置信度损失）
+                loss, loss_items = compute_loss(pred, targets.to(device), model)  
+                if rank != -1:  
+                    loss *= opt.world_size
+  
+            # 反向传播，scaler 是混合精度缩放工具
+            scaler.scale(loss).backward()  
+  
+            # 反向传播若干次更新一次参数  
+            if ni % accumulate == 0:  
+	            # 梯度更新
+                scaler.step(optimizer)
+                scaler.update()  
+                # 清空梯度
+                optimizer.zero_grad()  
+                # 将当前模型的参数更新到 EMA 模型中
+                if ema:  
+                    ema.update(model)  
+  
+            # Print 展示信息  
+            if rank in [-1, 0]:  
+                mloss = (mloss * i + loss_items) / (i + 1)  # update mean losses  
+                mem = '%.3gG' % (torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0)  # (GB)  
+                s = ('%10s' * 2 + '%10.4g' * 6) % (  
+                    '%g/%g' % (epoch, epochs - 1), mem, *mloss, targets.shape[0], imgs.shape[-1])  
+                pbar.set_description(s)  
+  
+                # Plot  
+                if ni < 3:  
+                    f = str(log_dir / ('train_batch%g.jpg' % ni))  # filename  
+                    result = plot_images(images=imgs, targets=targets, paths=paths, fname=f)  
+                    if tb_writer and result is not None:  
+                        tb_writer.add_image(f, result, dataformats='HWC', global_step=epoch)  
+                        # tb_writer.add_graph(model, imgs)  # add model to tensorboard  
+  
+            # end batch ------------------------------------------------------------------------------------------------  
+        # Scheduler 学习率衰减  
+        lr = [x['lr'] for x in optimizer.param_groups]  # for tensorboard  
+        scheduler.step()  
+  
+        # DDP process 0 or single-GPU  
+        if rank in [-1, 0]:  
+            # mAP 更新EMA  
+            if ema:  
+                ema.update_attr(model, include=['yaml', 'nc', 'hyp', 'gr', 'names', 'stride'])  
+            final_epoch = epoch + 1 == epochs  
+            if not opt.notest or final_epoch:  # Calculate mAP  
+                results, maps, times = test.test(opt.data,  
+                                                 batch_size=total_batch_size,  
+                                                 imgsz=imgsz_test,  
+                                                 model=ema.ema,  
+                                                 single_cls=opt.single_cls,  
+                                                 dataloader=testloader,  
+                                                 save_dir=log_dir,  
+                                                 plots=epoch == 0 or final_epoch)  # plot first and last  
+  
+            # Write            with open(results_file, 'a') as f:  
+                f.write(s + '%10.4g' * 7 % results + '\n')  # P, R, mAP@.5, mAP@.5-.95, val_loss(box, obj, cls)  
+            if len(opt.name) and opt.bucket:  # 这个整不了，涉及上传  
+                os.system('gsutil cp %s gs://%s/results/results%s.txt' % (results_file, opt.bucket, opt.name))  
+  
+            # Tensorboard  
+            if tb_writer:  
+                tags = ['train/box_loss', 'train/obj_loss', 'train/cls_loss',  # train loss  
+                        'metrics/precision', 'metrics/recall', 'metrics/mAP_0.5', 'metrics/mAP_0.5:0.95',  
+                        'val/box_loss', 'val/obj_loss', 'val/cls_loss',  # val loss  
+                        'x/lr0', 'x/lr1', 'x/lr2']  # params  
+                for x, tag in zip(list(mloss[:-1]) + list(results) + lr, tags):  
+                    tb_writer.add_scalar(tag, x, epoch)  
+  
+            # Update best mAP  
+            fi = fitness(np.array(results).reshape(1, -1))  # weighted combination of [P, R, mAP@.5, mAP@.5-.95]  
+            if fi > best_fitness:  
+                best_fitness = fi  
+  
+            # Save model  
+            save = (not opt.nosave) or (final_epoch and not opt.evolve)  
+            if save:  
+                with open(results_file, 'r') as f:  # create checkpoint  
+                    ckpt = {'epoch': epoch,  
+                            'best_fitness': best_fitness,  
+                            'training_results': f.read(),  
+                            'model': ema.ema,  
+                            'optimizer': None if final_epoch else optimizer.state_dict()}  
+  
+                # Save last, best and delete  
+                torch.save(ckpt, last)  
+                if best_fitness == fi:  
+                    torch.save(ckpt, best)  
+                del ckpt  
+        # end epoch ----------------------------------------------------------------------------------------------------  
+    # end training  
+    if rank in [-1, 0]:  
+        # Strip optimizers  
+        n = opt.name if opt.name.isnumeric() else ''  
+        fresults, flast, fbest = log_dir / f'results{n}.txt', wdir / f'last{n}.pt', wdir / f'best{n}.pt'  
+        for f1, f2 in zip([wdir / 'last.pt', wdir / 'best.pt', results_file], [flast, fbest, fresults]):  
+            if os.path.exists(f1):  
+                os.rename(f1, f2)  # rename  
+                if str(f2).endswith('.pt'):  # is *.pt  
+                    strip_optimizer(f2)  # strip optimizer  
+                    os.system('gsutil cp %s gs://%s/weights' % (f2, opt.bucket)) if opt.bucket else None  # upload  
+        # Finish        if not opt.evolve:  
+            plot_results(save_dir=log_dir)  # save as results.png  
+        logger.info('%g epochs completed in %.3f hours.\n' % (epoch - start_epoch + 1, (time.time() - t0) / 3600))  
+  
+    dist.destroy_process_group() if rank not in [-1, 0] else None  
+    torch.cuda.empty_cache()  
+    return results
 ```

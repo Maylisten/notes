@@ -71,3 +71,39 @@ softmax 层 改为使用 Sigmoid 激活函数映射到 0-1 之间，支持预测
 
 ## Yolov5
 偏向工程，原理变化不大
+
+## Yolov7
+### BN 融合
+训练时卷积和 BN独立，检测时卷积层和 BN 层融合，从而在推理时减少不必要的计算和内存开销，提高模型的推理效率。
+假设卷积层的输出为：
+$$
+y = x * W + b
+$$
+其中：
+• x  是输入特征图
+• W  是卷积核
+• b  是卷积偏置项
+BN 层对卷积的输出进行归一化，再通过缩放和偏移操作，计算公式为：
+$$
+y_{\text{BN}} = \gamma \frac{y - \mu}{\sqrt{\sigma^2 + \epsilon}} + \beta
+$$
+其中：
+• $\mu$  和 $\sigma^2$  是当前批次的均值和方差（在推理时为固定的训练均值和方差
+• $\gamma$  和  $\beta$  是 BN 层的可学习参数，分别为缩放和偏移参数。
+• $\epsilon$  是一个小的常数，防止除零
+
+将卷积层输出  y  带入 BN 的公式：  
+$$
+y_{\text{BN}} = \gamma \frac{x * W + b - \mu}{\sqrt{\sigma^2 + \epsilon}} + \beta
+$$
+可以重写为：
+$$
+y_{\text{BN}} = (x * \tilde{W}) + \tilde{b}
+$$
+其中：
+$$
+\tilde{W} = \frac{\gamma}{\sqrt{\sigma^2 + \epsilon}} W
+$$
+$$
+\tilde{b} = \frac{\gamma (b - \mu)}{\sqrt{\sigma^2 + \epsilon}} + \beta
+$$
