@@ -107,3 +107,20 @@ $$
 $$
 \tilde{b} = \frac{\gamma (b - \mu)}{\sqrt{\sigma^2 + \epsilon}} + \beta
 $$
+
+###  3x3 卷积核
+由于英伟达对 3x3 卷积优化好，所以将 1x1 卷积和残差都转为 3x3 卷积
+#### 1x1 卷积 -> 3x3 卷积
+
+通过卷积核 padding 和原始图像 padding 0 ，实现使用 3x3 卷积核代替 1x1 卷积核
+![image.png](https://gitee.com/may1234/md-imgs/raw/master/202411022042753.png)
+
+#### 残差 -> 3x3 卷积
+直接相加也转为进行一次 3x3 的卷积
+![image.png](https://gitee.com/may1234/md-imgs/raw/master/202411022046040.png)
+
+#### 多分支融合
+
+![image.png](https://gitee.com/may1234/md-imgs/raw/master/202411022053954.png)
+
+### 正样本分配策略
