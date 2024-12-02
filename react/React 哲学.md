@@ -147,6 +147,11 @@ Effect 特指 React 中渲染本身产生的而不是事件触发的 『side eff
 在 **commit 之后**执行，在 render 变动更新到真实 DOM 上后执行。
 换句话说，**Effect 被执行时，DOM 已经准备好了**。
 
+### Effect 的作用
+用来**同步** React 的 **state 和外部系统** ，比如 dom api，network connection 。
+
+
+
 
 
 
