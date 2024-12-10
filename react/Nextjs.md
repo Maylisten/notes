@@ -355,3 +355,18 @@ export default function RootLayout({
 - 将数据从服务端组件传给客户端组件 
 
 ## Cache
+### 缓存类型
+
+| Mechanism           | What                       | Where  | Purpose                                         | Duration                        |
+| ------------------- | -------------------------- | ------ | ----------------------------------------------- | ------------------------------- |
+| Request Memoization | Return values of functions | Server | Re-use data in a React Component tree           | Per-request lifecycle           |
+| Data Cache          | Data                       | Server | Store data across user requests and deployments | Persistent (can be revalidated) |
+| Full Route Cache    | HTML and RSC payload       | Server | Reduce rendering cost and improve performance   | Persistent (can be revalidated) |
+| Router Cache        | RSC Payload                | Client | Reduce server requests on navigation            | User session or time-based      |
+### 缓存影响因素
+- 静态渲染/动态渲染
+- 已有缓存/无缓存
+- 初次访问/后续导航
+### Request Memoization
+
+### Data Cache
