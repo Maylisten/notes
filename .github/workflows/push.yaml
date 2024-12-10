@@ -17,7 +17,7 @@ jobs:
         run: npm install
       - name: 打包
         run: npm run build
-      - name: 发布到阿里云
+      - name: 通过 ssh 发布到远程服务器
         uses: easingthemes/ssh-deploy@main
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
@@ -27,4 +27,4 @@ jobs:
           # 用户
           REMOTE_USER: 'root'
           # 目标地址
-          TARGET: '/root/static/blog/'
+          TARGET: '/www/wwwroot/blog/'
