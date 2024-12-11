@@ -14,29 +14,28 @@
 nextjs 会在构建时同时打包字体，避免客户端单独请求字体文件
 使用方法：
 - 在`app/ui`下创建`fonts.ts`文件用于管理自己定义字体
-```ts
-import {Inter, Lusitana} from 'next/font/google';  
-export const inter = Inter({subsets: ['latin']});  
-export const lusitana = Lusitana({subsets: ['latin'], weight: "400"});
-```
+	```ts
+	import {Inter, Lusitana} from 'next/font/google';  
+	export const inter = Inter({subsets: ['latin']});  
+	export const lusitana = Lusitana({subsets: ['latin'], weight: "400"});
+	```
 - 在`tsx` 文件中引入使用
-```tsx
-import '@/app/ui/global.css';
-import { inter } from '@/app/ui/fonts';
-
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return (
-    <html lang="en">
-      <body className={`${inter.className} antialiased`}>{children}</body>
-    </html>
-  );
-}
-```
-
+	```tsx
+	import '@/app/ui/global.css';
+	import { inter } from '@/app/ui/fonts';
+	
+	export default function RootLayout({
+	  children,
+	}: {
+	  children: React.ReactNode;
+	}) {
+	  return (
+	    <html lang="en">
+	      <body className={`${inter.className} antialiased`}>{children}</body>
+	    </html>
+	  );
+	}
+	```
 ### 图片优化
 使用 `<Image/>` 组件
 - 当图片加载时自动防止布局偏移。
@@ -46,9 +45,7 @@ export default function RootLayout({
 
 ## 项目结构
 ### 文件系统路由
-nestjs 使用文件系统路由
-![](https://raw.githubusercontent.com/Maylisten/image-hosting/main/202412042122159.png)
-![](https://raw.githubusercontent.com/Maylisten/image-hosting/main/202412042123347.png)
+nestjs 使用文件系统路由![](https://raw.githubusercontent.com/Maylisten/image-hosting/main/202412042122159.png)![](https://raw.githubusercontent.com/Maylisten/image-hosting/main/202412042123347.png)
 ### Pages 和  Page
 - `app` 根目录下的`pages.tsx`作为主页入口(`/`)，导出`<Page/>组件
 - 每个文件夹下 `page.tsx` 导出`<Page/>`组件作为该路由的入口，也只有包含名为 `page.tsx`特殊文件的文件夹会被视为路由
@@ -56,9 +53,7 @@ nestjs 使用文件系统路由
 ### RootLayou 和 Layout
 - `app`根目录下有一个`layout.tsx`文件用于导出 `<RootLayout />` 组件，其接收一个children属性，即 `pages.tsx`导出的`<Page/>`组件
 - 每个目录下可以有一个`layout.tsx`文件用于导出 `<Layout />` 组件，其接收一个children属性，可以是同路径或下一路径的`<Page/>`、下一级`<Layout/>`。
-- 在路由跳转时，只有页面部分会 re-render，layout 部分不会
-
-![image.png](https://raw.githubusercontent.com/Maylisten/image-hosting/main/202412042143178.png)
+- 在路由跳转时，只有页面部分会 re-render，layout 部分不会![image.png](https://raw.githubusercontent.com/Maylisten/image-hosting/main/202412042143178.png)
 ### loading
 `loading.tsx`是一个基于 `<Suspense/>` 构建的 Next.js 特殊文件，允许在页面内容加载时创建一个备选 UI 来显示
 
@@ -76,48 +71,48 @@ nestjs 使用文件系统路由
 ## 路由
 ### 跳转
 - `<Link/>` 『client』有默认的预加载，推荐使用
-```jsx
-import Link from 'next/link'
- 
-export default function Page() {
-  return <Link href="/dashboard">Dashboard</Link>
-}	
-```
+	```jsx
+	import Link from 'next/link'
+	 
+	export default function Page() {
+	  return <Link href="/dashboard">Dashboard</Link>
+	}	
+	```
 - useRouter()『client』
-```jsx
-'use client'
- 
-import { useRouter } from 'next/navigation'
- 
-export default function Page() {
-  const router = useRouter()
- 
-  return (
-    <button type="button" onClick={() => router.push('/dashboard')}>
-      Dashboard
-    </button>
-  )
-}
-```
+	```jsx
+	'use client'
+	 
+	import { useRouter } from 'next/navigation'
+	 
+	export default function Page() {
+	  const router = useRouter()
+	 
+	  return (
+	    <button type="button" onClick={() => router.push('/dashboard')}>
+	      Dashboard
+	    </button>
+	  )
+	}
+	```
 - redirect 『server』
-```jsx
-import { redirect } from 'next/navigation'
- 
-async function fetchTeam(id: string) {
-  const res = await fetch('https://...')
-  if (!res.ok) return undefined
-  return res.json()
-}
- 
-export default async function Profile({ params }: { params: { id: string } }) {
-  const team = await fetchTeam(params.id)
-  if (!team) {
-    redirect('/login')
-  }
- 
-  // ...
-}
-```
+	```jsx
+	import { redirect } from 'next/navigation'
+	 
+	async function fetchTeam(id: string) {
+	  const res = await fetch('https://...')
+	  if (!res.ok) return undefined
+	  return res.json()
+	}
+	 
+	export default async function Profile({ params }: { params: { id: string } }) {
+	  const team = await fetchTeam(params.id)
+	  if (!team) {
+	    redirect('/login')
+	  }
+	 
+	  // ...
+	}
+	```
 
 ### Code Split
 定义：将程序代码拆分成更小bundle，只传输需要的部分，从而减少请求时间。
@@ -195,41 +190,41 @@ export function Signup() {
 
 #### 使用 nestjs sdk 和 sql 进行查询
 - 服务端组件使用异步组件，并在 render 函数中直接查询
-```tsx
-import { Card } from '@/app/ui/dashboard/cards';
-import RevenueChart from '@/app/ui/dashboard/revenue-chart';
-import LatestInvoices from '@/app/ui/dashboard/latest-invoices';
-import { lusitana } from '@/app/ui/fonts';
-import { fetchRevenue } from '@/app/lib/data';
- 
-export default async function Page() {
-	const revenue = await fetchRevenue();
-	return (
-	<main>
-	  <h1 className={`${lusitana.className} mb-4 text-xl md:text-2xl`}>
-		Dashboard
-	  </h1>
-	  <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-	  </div>
-	  <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-4 lg:grid-cols-8">
-		<RevenueChart revenue={revenue}  />
-	  </div>
-	</main>
-	);
-}
-```
+	```tsx
+	import { Card } from '@/app/ui/dashboard/cards';
+	import RevenueChart from '@/app/ui/dashboard/revenue-chart';
+	import LatestInvoices from '@/app/ui/dashboard/latest-invoices';
+	import { lusitana } from '@/app/ui/fonts';
+	import { fetchRevenue } from '@/app/lib/data';
+	 
+	export default async function Page() {
+		const revenue = await fetchRevenue();
+		return (
+		<main>
+		  <h1 className={`${lusitana.className} mb-4 text-xl md:text-2xl`}>
+			Dashboard
+		  </h1>
+		  <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+		  </div>
+		  <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-4 lg:grid-cols-8">
+			<RevenueChart revenue={revenue}  />
+		  </div>
+		</main>
+		);
+	}
+	```
 - 使用sql 语句进行异步数据库查询
-```ts
-export async function fetchRevenue() {  
-  try {  
-    const data = await sql<Revenue>`SELECT * FROM revenue`;  
-    return data.rows;  
-  } catch (error) {  
-    console.error('Database Error:', error);  
-    throw new Error('Failed to fetch revenue data.');  
-  }  
-}
-```
+	```ts
+	export async function fetchRevenue() {  
+	  try {  
+	    const data = await sql<Revenue>`SELECT * FROM revenue`;  
+	    return data.rows;  
+	  } catch (error) {  
+	    console.error('Database Error:', error);  
+	    throw new Error('Failed to fetch revenue data.');  
+	  }  
+	}
+	```
 
 ## 渲染
 
@@ -260,10 +255,18 @@ RSC Payload 是 React 服务器组件树的紧凑二进制数据结构， React�
 
 ### 服务端渲染策略
 关于服务端渲染，开发者往往不需要考虑具体选择哪个方案，这些 nextjs 框架会根据具体情况自动完成，而是应该考虑将哪些部分需要用`<Suspense/>`包裹，什么时候使用 `cache` 或者 `revalidate specific data`
+
+| Dynamic APIs | Data       | Route                |
+| ------------ | ---------- | -------------------- |
+| No           | Cached     | Statically Rendered  |
+| Yes          | Cached     | Dynamically Rendered |
+| No           | Not Cached | Dynamically Rendered |
+| Yes          | Not Cached | Dynamically Rendered |
+
 - 静态策略（默认）
 	- 在 build 的时候 render **页面**，或者当 data revalidation 的时候在后台 render
 	- 可以跨用户、跨请求共享render 结果，构建结果可以放置到边缘服务器中
-	- 要求使用的数据在构建时已知
+	- 要求使用的数据在构建时已知，并且需要在 Data Cache 中
 - 动态策略
 	- 每次响应请求的时候 render **页面**
 	- 适用于使用的数据和请求和具体场景有关（构建时未知）
@@ -282,49 +285,48 @@ RSC Payload 是 React 服务器组件树的紧凑二进制数据结构， React�
 	使用`server-only`库强制模块只能运行在特定环境，否则打包时报错
 - 使用第三方模块
 	一些第三方库和组件使用了钩子和 windows API，需要显式声明需要在客户端环境下渲染
-```tsx
-'use client'
- 
-import { Carousel } from 'acme-carousel'
- 
-export default Carousel
-```
+	```tsx
+	'use client'
+	 
+	import { Carousel } from 'acme-carousel'
+	 
+	export default Carousel
+	```
 - 使用 context
 	- 在单独的文件中创建自定义上下文 Provider
+		```tsx
+		'use client'
+		 
+		import { createContext } from 'react'
+		 
+		export const ThemeContext = createContext({})
+		 
+		export default function ThemeProvider({
+		  children,
+		}: {
+		  children: React.ReactNode
+		}) {
+		  return <ThemeContext.Provider value="dark">{children}</ThemeContext.Provider>
+		}
+		```
 	-  在层级尽可能深的地方使用自定义的上下文 Provider
-```tsx
-'use client'
- 
-import { createContext } from 'react'
- 
-export const ThemeContext = createContext({})
- 
-export default function ThemeProvider({
-  children,
-}: {
-  children: React.ReactNode
-}) {
-  return <ThemeContext.Provider value="dark">{children}</ThemeContext.Provider>
-}
-```
-
-```tsx
-import ThemeProvider from './theme-provider'
- 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
-  return (
-    <html>
-      <body>
-        <ThemeProvider>{children}</ThemeProvider>
-      </body>
-    </html>
-  )
-}
-```
+	```tsx
+	import ThemeProvider from './theme-provider'
+	 
+	export default function RootLayout({
+	  children,
+	}: {
+	  children: React.ReactNode
+	}) {
+	  return (
+	    <html>
+	      <body>
+	        <ThemeProvider>{children}</ThemeProvider>
+	      </body>
+	    </html>
+	  )
+	}
+	```
 
 ### 客户端组件
 交互式UI，在服务器上预渲染，使用客户端 JavaScript 在浏览器中运行
@@ -368,5 +370,111 @@ export default function RootLayout({
 - 已有缓存/无缓存
 - 初次访问/后续导航
 ### Request Memoization
+#### 基本定义
+ React 扩展了 fetch API，自动缓存具有相同 URL 和选项的请求。![image.png](http://43.142.166.50:9001/image-hosting/20241210214602477.png)
+#### 有效时期
+缓存从服务请求直到 React 组件树完成渲染
+#### 刷新方法
+无需刷新
+#### 禁用方法
+不使用 GET 方法
+#### 重点总结
+- 在一次组件树的 render 过程中只会执行一次， 利用这一点可以方便进行不同页面的共享
+- 一旦路由渲染完成且渲染过程结束，Request Memoization 会被重置清除
+- Request Memoization 优先级高于 Data Cache
+- Request Memoization **只作用于 Server Component**，Route Handler 和 Client Component 中没有
+-  Request Memoization **只对 GET 有效**，POST、DELTE 等请求方法无效
 
 ### Data Cache
+#### 基本定义
+Next.js 扩展了原生的 fetch API，内置了一个可以跨请求和部署持久化的 Data Cache，并允许服务器上的每个请求设置自己的持久化缓存语义。
+nextjs 中的 `cache`和 http 中的`cache`含义不同。在浏览器中，`fetch` 的 `cache` 选项表示请求如何与浏览器的 HTTP 缓存交互。但是在 Next.js 中，`cache` 选项表示服务器端请求如何与服务器端的数据缓存交互。![image.png](http://43.142.166.50:9001/image-hosting/20241210222212692.png)
+#### 有效时期
+除非 revalidate 或者禁止使用 ，Data Cache 一直存在，并且跨入站请求和部署共享。
+#### 刷新方法
+- 基于时间
+	开发者可以设置 Data Cache 的自动刷新的时间，*在数据刷新过程中或者刷新数据失败时，Data Cache 中会保留旧的数据*
+	```tsx
+	// Revalidate at most every hour
+	fetch('https://...', { next: { revalidate: 3600 } })
+	```
+	![image.png](http://43.142.166.50:9001/image-hosting/20241210222729445.png)
+- 基于需求
+	按照实际需求，开发者可以主动去更新Data Cache，实现方式是*清除 Data Cache 中的数据*，在下次请求时自然会重新请求。常用在 `Route Handler` 和 `Server Action`中![image.png](http://43.142.166.50:9001/image-hosting/20241211145149502.png)
+	- revalidatePath
+		手动重新验证数据，并 re-render 指定的路由
+		```tsx
+		revalidatePath('/')		
+		```
+	- revalidateTag
+		创建 Data Cache 时可以为条目添加一个或多个标签，之后可以调用`revalidateTag`来清除与该标签关联的 Data Cache
+		```tsx
+		/// Cache data with a tag
+		fefetch(`https://...`, { next: { tags: ['a', 'b', 'c'] } })
+		
+		//// Revalidate entries with a specific 
+		tagrevalidateTag('a')
+		`````
+#### 禁用方法
+```tsx
+let data = await fetch('https://api.vercel.app/blog', { cache: 'no-store' })
+```
+
+#### 重点总结
+- 基于时间的刷新如果失败不会清空旧的数据，而基于需求的主动刷新通过清空数据来实现数据的刷新
+- `revalidatePath`先清空Data Cache，后 re-render
+- 就算重新部署，Data Cache 也不会清除，是跨部署共享的
+
+### Full Route Cache
+#### 基本定义
+在 Static Render 或 revalidation 时，Next.js 会在服务端缓存通过 Render 得到的 RSC Payload 和 HTML
+![image.png](http://43.142.166.50:9001/image-hosting/20241211162137719.png)
+
+#### 有效时间
+永久有效
+#### 刷新方法
+- revalidation 或禁用 Data Cache 会使 Full Route Cache 刷新（因为 render 依赖数据，所以 Nextjs 会在 Data Cache 更新时同步更新 Full Route Cache）
+- 重新部署（不同于 Data Cache)
+#### 禁用方法
+禁用 Full Router Cache 的方法本质就是将静态渲染改为动态渲染的方法
+- 使用 Dynamic API 
+- 禁用 Data Cache
+- 使用`dynamic = 'force-dynamic'` 或 `revalidate = 0` route 配置选项
+#### 重点总结
+- 只有静态渲染会使用 Full Route Cache，动态渲染会直接略过
+- Full Route Cache 是依赖 Data Cache 的，如果在 Render 时取得的数据没有被缓存，则 Full Route Cache 也会失效
+
+### Client Route Cache
+#### 基本定义
+在客户端内存中，通过存储 RSC payload ，缓存访问过的路由和预加载的路由
+- Layout 缓存，用于部分渲染策略
+- Loading 预加载，用于立即渲染
+- Page 默认不预加载, 但实际上在前进后退跳转时会使用，未来会有相关功能（ `staleTimes` 实验特性）
+![image.png](http://43.142.166.50:9001/image-hosting/20241211193814495.png)
+#### 有效时间
+缓存存储在浏览器的临时内存中
+- 会话
+	页面刷新时丢失全部的 Client Route Cache
+- Automatic Invalidation Period
+	- 默认预加载 (`prefetch={null}` 或未指定)：动态页面不缓存，静态页面缓存5分钟
+	- 完全预取预加载(`prefetch={true}` 或 `router.prefetch`)：静态和动态页面均缓存为5分钟
+#### 刷新方法
+ - 在 Server Action 中使用 `revalidatePath`和 `revalidateTag`
+ - 使用 `router.refresh`
+#### 禁用方法
+- Page 默认就是不使用 Client Route Cache
+- 通过配置`prefetch=false`阻止`<Link/>`预加载
+
+#### 重点总结
+- 无论是 Full Route Cache 还是 Client Route  Cache 存储的都是服务端渲染的结果
+- 动态渲染和静态渲染都会使用 Client Route Cache，并且比 Full Route Cache 优先级更高
+- 页面刷新会一次性清空所有的 Client Route Cache，而自动失效时间计算是各个路由段相互独立的
+- Prefetch 时默认缓存的是 Loading 而不是 Page
+
+### Data Cache 和 Route Cache
+#### Data Cache and Full Route Cache
+- revalidation 或 禁用 Data Cache 的行为会使得 Full Route Cache 失效，因为 Render 依赖于数据
+- 取消 Full Route Cache 不会影响 Data Cache。动态渲染可以同时使用缓存和没缓存的数据，重新渲染也不会导致缓存的数据重新获取
+#### Data Cache and Client-side Router cache
+- 在 Server Action 中，可以使用`revalidatePath`或`revalidateTag`立即清除Data Cache 和 Client Router Cache
+- 在 Route Handler 中，因为 Route Handler 与路由无关，更新或取消 Data Cache 不会立刻是清除 Router Cache，除非刷新网页或者 Client Router Cache 过期
