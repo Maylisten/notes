@@ -442,9 +442,8 @@ revalidatePath('/posts')
 }
 ```
 	
-- 基于需求（主动）
-	- revalidatePath
-	```tsx
+ - revalidatePath                                                                 
+```tsx
 'use server'
  
 import { revalidatePath } from 'next/cache'
@@ -453,36 +452,37 @@ export async function createPost() {
   // Invalidate the /posts route in the cache
   revalidatePath('/posts')
 }
-	```
-	- revalidateTag
-	```tsx
+```
+
+ - revalidateTag                                
+```tsx
 /// app/blog/page.tsx
-	import { unstable_cache } from 'next/cache'
-	import { db, posts } from '@/lib/db'
-	 
-	const getCachedPosts = unstable_cache(
-	  async () => {
-		return await db.select().from(posts)
-	  },
-	  ['posts'],
-	  { revalidate: 3600, tags: ['posts'] }
-	)
-	 
-	export default async function Page() {
-	  const posts = getCachedPosts()
-	  // ...
-	}
+import { unstable_cache } from 'next/cache'
+import { db, posts } from '@/lib/db'
+ 
+const getCachedPosts = unstable_cache(
+  async () => {
+	return await db.select().from(posts)
+  },
+  ['posts'],
+  { revalidate: 3600, tags: ['posts'] }
+)
+ 
+export default async function Page() {
+  const posts = getCachedPosts()
+  // ...
+}
 
 /// app/actions.ts
 'use server'
- 
+
 import { revalidateTag } from 'next/cache'
- 
+
 export async function createPost() {
-  // Invalidate all data tagged with 'posts' in the cache
-  revalidateTag('posts')
+// Invalidate all data tagged with 'posts' in the cache
+revalidateTag('posts')
 }
-````
+```
 
 ## 渲染
 
