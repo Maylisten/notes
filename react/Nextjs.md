@@ -182,49 +182,307 @@ export function Signup() {
 - 使用`<ErrorBounding/>`组件
 
 ## Data Query
-### 服务端组件
-#### 服务端组件获取数据的优势
+### 在服务端组件获取数据的优势
 - 支持Promise，可以使用`async/await`语法，无需使用`useEffect`、`useState`或 data fetching 库
 - 请求数据和逻辑运行在服务器上，只将结果发送到客户端，提升性能
 - 直接查询数据库，无需额外的API层
 
-#### 使用 nestjs sdk 和 sql 进行查询
-- 服务端组件使用异步组件，并在 render 函数中直接查询
+### Fetch
+
+#### 请求工具的选择
+- 对于服务端组件请求，因为可以直接使用异步语法，所以推荐使用 nextjs 扩展的`fetch`函数
+- 对于客户端组件请求，需要避免大量使用`useEffect`，所以推荐使用 SWR 或 React Query
+#### unstable_cache 和 cache
+- 使用 `unstable_cache` 缓存（Data Cache）响应，可以让页面在下次 build 时预加载（静态渲染策略）
 	```tsx
-	import { Card } from '@/app/ui/dashboard/cards';
-	import RevenueChart from '@/app/ui/dashboard/revenue-chart';
-	import LatestInvoices from '@/app/ui/dashboard/latest-invoices';
-	import { lusitana } from '@/app/ui/fonts';
-	import { fetchRevenue } from '@/app/lib/data';
+	import { unstable_cache } from 'next/cache'
+	import { db, posts } from '@/lib/db'
+	 
+	const getPosts = unstable_cache(
+	  async () => {
+	    return await db.select().from(posts)
+	  },
+	  ['posts'],
+	  { revalidate: 3600, tags: ['posts'] }
+	)
 	 
 	export default async function Page() {
-		const revenue = await fetchRevenue();
-		return (
-		<main>
-		  <h1 className={`${lusitana.className} mb-4 text-xl md:text-2xl`}>
-			Dashboard
-		  </h1>
-		  <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-		  </div>
-		  <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-4 lg:grid-cols-8">
-			<RevenueChart revenue={revenue}  />
-		  </div>
-		</main>
-		);
+	  const allPosts = await getPosts()
+	 
+	  return (
+	    <ul>
+	      {allPosts.map((post) => (
+	        <li key={post.id}>{post.title}</li>
+	      ))}
+	    </ul>
+	  )
 	}
 	```
-- 使用sql 语句进行异步数据库查询
-	```ts
-	export async function fetchRevenue() {  
-	  try {  
-	    const data = await sql<Revenue>`SELECT * FROM revenue`;  
-	    return data.rows;  
-	  } catch (error) {  
-	    console.error('Database Error:', error);  
-	    throw new Error('Failed to fetch revenue data.');  
-	  }  
-	}
+- 使用`cache`缓存响应，可以避免单次渲染的重复请求（Request Memoization）
+	```tsx
+	import { cache } from 'react'
+import { db, posts, eq } from '@/lib/db' // Example with Drizzle ORM
+import { notFound } from 'next/navigation'
+ 
+export const getPost = cache(async (id) => {
+  const post = await db.query.posts.findFirst({
+    where: eq(posts.id, parseInt(id)),
+  })
+ 
+  if (!post) notFound()
+  return post
+})
+```
+#### Preloading Data
+利用缓存，在渲染组件前提前获取数据起到缓存效果
+```tsx
+// components/Item.tsx
+import { getItem } from '@/utils/get-item'
+ 
+export const preload = (id: string) => {
+  // void evaluates the given expression and returns undefined
+  // https://developer.mozilla.org/docs/Web/JavaScript/Reference/Operators/void
+  void getItem(id)
+}
+export default async function Item({ id }: { id: string }) {
+  const result = await getItem(id)
+  // ...
+}
+
+// app/item/[id]/page.tsx
+import Item, { preload, checkIsAvailable } from '@/components/Item'
+ 
+export default async function Page({
+  params,
+}: {
+  params: Promise<{ id: string }>
+}) {
+  const { id } = await params
+  // starting loading item data
+  preload(id)
+  // perform another asynchronous task
+  const isAvailable = await checkIsAvailable()
+ 
+  return isAvailable ? <Item id={id} /> : null
+}
+```
+
+#### server-only
+通过引入 server-only 库可以保证代码运行在服务端（或客户端），否则抛出异常
+```tsx
+import { cache } from 'react'
+import 'server-only'
+ 
+export const preload = (id: string) => {
+  void getItem(id)
+}
+ 
+export const getItem = cache(async (id: string) => {
+  // ...
+})
+```
+
+### Server Action
+#### 基本概念
+- Server Action 是运行在服务端的异步函数
+- 如果在服务端组件使用，即使浏览器不支持 JavaScript 也可以起作用
+- 可以用在服务端或客户端组件中
+- 没使用限制
+- 底层创建了一个公共的 HTTP POST端点，并创建加密的、非确定性（build 的时候会重新计算）的 ID，以便客户端可以引用和调用服务器操作
+- 会使用 nextjs 的缓存机制
+- 参数和返回值必须可以被 React 序列化
+- 继承被使用时Page 或 Layout 的 runtime 和 Route Segment Config
+#### 'use server'
+'use server' 可以使用在文件顶部或者在函数顶部
+```tsx
+'use server'
+
+export default function Page() {
+  // Server Action
+  async function create() {
+    'use server'
+    // Mutate data
+  }
+ 
+  return '...'
+}
+```
+
+#### 使用限制
+Server Action 可以在 Client Component 中处理表单提交、事件处理、useEffect或者被当做参数传递，没有任何限制
+
+#### 基本使用
+```tsx
+// app/ui/signup.tsx
+'use client'
+ 
+import { useActionState } from 'react'
+import { createUser } from '@/app/actions'
+ 
+const initialState = {
+  message: '',
+}
+ 
+export function Signup() {
+  const [state, formAction, pending] = useActionState(createUser, initialState)
+ 
+  return (
+    <form action={formAction}>
+      <label htmlFor="email">Email</label>
+      <input type="text" id="email" name="email" required />
+      {/* ... */}
+      <p aria-live="polite">{state?.message}</p>
+      <button disabled={pending}>Sign up</button>
+    </form>
+  )
+}
+
+// app/actions.ts
+'use server'
+
+import { redirect } from 'next/navigation'
+ 
+export async function createUser(prevState: any, formData: FormData) {
+  const res = await fetch('https://...')
+  const json = await res.json()
+ 
+  if (!res.ok) {
+    return { message: 'Please enter a valid email' }
+  }
+ 
+  redirect('/dashboard')
+}
+```
+
+#### 闭包
+使用 Server Action 时可能会产生闭包
+```tsx
+export default async function Page() {
+  const publishVersion = await getLatestVersion();
+ 
+  async function publish() {
+    "use server";
+    if (publishVersion !== await getLatestVersion()) {
+      throw new Error('The version has changed since pressing publish');
+    }
+    ...
+  }
+ 
+  return (
+    <form>
+      <button formAction={publish}>Publish</button>
+    </form>
+  );
+}
+```
+这会导致数据从客户端流回服务端，为了保护数据安全，nextjs 会在构建时产生额外的密钥，推荐使用 React taint APIs 保护数据隐私
+
+### ISR（Incremental Static Regeneration）
+#### 定义
+在构建时生成初始的静态页面，同时允许在运行时按需重新生成页面内容（缓存动态渲染结果，变为静态渲染），特征如下：
+- 更新静态内容而不需要重建整个网站（因为是增量更新，请求后的页面会被缓存下来）
+- 通过为大多数请求提供预渲染的静态页面来减少服务器负载（因为更新后变成了静态渲染）
+- 确保自动添加适当的 `cache-control` 头部到页面
+- 处理大量内容页面而无需长时间 `next build` 时间（因为增量更新）
+
+#### 使用方法
+```tsx
+interface Post {
+  id: string
+  title: string
+  content: string
+}
+ 
+// 重新校验数据的间隔时间
+// 0： dynamic render
+// 30: 30s 校验一次
+// false（默认）: 无期限缓存，不校验
+export const revalidate = 60
+
+// 是否有动态的 Param
+// false: 访问没缓存的页面会 404
+// true： 访问没缓存的页面会动态渲染
+export const dynamicParams = true 
+ 
+export async function generateStaticParams() {
+  const posts: Post[] = await fetch('https://api.vercel.app/blog').then((res) =>
+    res.json()
+  )
+  return posts.map((post) => ({
+    id: String(post.id),
+  }))
+}
+ 
+export default async function Page({
+  params,
+}: {
+  params: Promise<{ id: string }>
+}) {
+  const id = (await params).id
+  const post: Post = await fetch(`https://api.vercel.app/blog/${id}`).then(
+    (res) => res.json()
+  )
+  return (
+    <main>
+      <h1>{post.title}</h1>
+      <p>{post.content}</p>
+    </main>
+  )
+}
+```
+
+#### Revalidate
+- 基于时间
+```tsx
+'use server'
+import { revalidatePath } from 'next/cache'
+export async function createPost() {
+// Invalidate the /posts route in the cache
+revalidatePath('/posts')
+}
+```
+	
+- 基于需求（主动）
+	- revalidatePath
+	```tsx
+'use server'
+ 
+import { revalidatePath } from 'next/cache'
+ 
+export async function createPost() {
+  // Invalidate the /posts route in the cache
+  revalidatePath('/posts')
+}
 	```
+	- revalidateTag
+	```tsx
+/// app/blog/page.tsx
+	import { unstable_cache } from 'next/cache'
+	import { db, posts } from '@/lib/db'
+	 
+	const getCachedPosts = unstable_cache(
+	  async () => {
+		return await db.select().from(posts)
+	  },
+	  ['posts'],
+	  { revalidate: 3600, tags: ['posts'] }
+	)
+	 
+	export default async function Page() {
+	  const posts = getCachedPosts()
+	  // ...
+	}
+
+/// app/actions.ts
+'use server'
+ 
+import { revalidateTag } from 'next/cache'
+ 
+export async function createPost() {
+  // Invalidate all data tagged with 'posts' in the cache
+  revalidateTag('posts')
+}
+````
 
 ## 渲染
 
@@ -310,23 +568,23 @@ RSC Payload 是 React 服务器组件树的紧凑二进制数据结构， React�
 		}
 		```
 	-  在层级尽可能深的地方使用自定义的上下文 Provider
-	```tsx
-	import ThemeProvider from './theme-provider'
-	 
-	export default function RootLayout({
-	  children,
-	}: {
-	  children: React.ReactNode
-	}) {
-	  return (
-	    <html>
-	      <body>
-	        <ThemeProvider>{children}</ThemeProvider>
-	      </body>
-	    </html>
-	  )
-	}
-	```
+		```tsx
+		import ThemeProvider from './theme-provider'
+		 
+		export default function RootLayout({
+		  children,
+		}: {
+		  children: React.ReactNode
+		}) {
+		  return (
+		    <html>
+		      <body>
+		        <ThemeProvider>{children}</ThemeProvider>
+		      </body>
+		    </html>
+		  )
+		}
+		```
 
 ### 客户端组件
 交互式UI，在服务器上预渲染，使用客户端 JavaScript 在浏览器中运行
@@ -365,7 +623,10 @@ RSC Payload 是 React 服务器组件树的紧凑二进制数据结构， React�
 | Data Cache          | Data                       | Server | Store data across user requests and deployments | Persistent (can be revalidated) |
 | Full Route Cache    | HTML and RSC payload       | Server | Reduce rendering cost and improve performance   | Persistent (can be revalidated) |
 | Router Cache        | RSC Payload                | Client | Reduce server requests on navigation            | User session or time-based      |
+
+
 ### 缓存影响因素
+![image.png](http://43.142.166.50:9001/image-hosting/20241212093025432.png)
 - 静态渲染/动态渲染
 - 已有缓存/无缓存
 - 初次访问/后续导航
@@ -374,7 +635,7 @@ RSC Payload 是 React 服务器组件树的紧凑二进制数据结构， React�
  React 扩展了 fetch API，自动缓存具有相同 URL 和选项的请求。![image.png](http://43.142.166.50:9001/image-hosting/20241210214602477.png)
 #### 有效时期
 缓存从服务请求直到 React 组件树完成渲染
-#### 刷新方法
+#### 刷新方法(revalidate)
 无需刷新
 #### 禁用方法
 不使用 GET 方法
@@ -388,10 +649,11 @@ RSC Payload 是 React 服务器组件树的紧凑二进制数据结构， React�
 ### Data Cache
 #### 基本定义
 Next.js 扩展了原生的 fetch API，内置了一个可以跨请求和部署持久化的 Data Cache，并允许服务器上的每个请求设置自己的持久化缓存语义。
-nextjs 中的 `cache`和 http 中的`cache`含义不同。在浏览器中，`fetch` 的 `cache` 选项表示请求如何与浏览器的 HTTP 缓存交互。但是在 Next.js 中，`cache` 选项表示服务器端请求如何与服务器端的数据缓存交互。![image.png](http://43.142.166.50:9001/image-hosting/20241210222212692.png)
+nextjs 中的 `cache`和 http 中的`cache`含义不同。在浏览器中，`fetch` 的 `cache` 选项表示请求如何与浏览器的 HTTP 缓存交互。但是在 Next.js 中，`cache` 选项表示服务器端请求如何与服务器端的数据缓存交互。
+![image.png](http://43.142.166.50:9001/image-hosting/20241210222212692.png)
 #### 有效时期
 除非 revalidate 或者禁止使用 ，Data Cache 一直存在，并且跨入站请求和部署共享。
-#### 刷新方法
+#### 刷新方法(revalidate)
 - 基于时间
 	开发者可以设置 Data Cache 的自动刷新的时间，*在数据刷新过程中或者刷新数据失败时，Data Cache 中会保留旧的数据*
 	```tsx
@@ -421,7 +683,7 @@ let data = await fetch('https://api.vercel.app/blog', { cache: 'no-store' })
 ```
 
 #### 重点总结
-- 基于时间的刷新如果失败不会清空旧的数据，而基于需求的主动刷新通过清空数据来实现数据的刷新
+- 基于时间的刷新如果失败不会清空旧的数据,而是在下次请求的时候重新尝试获取新数据；基于需求的主动刷新通过清空数据来实现数据的刷新
 - `revalidatePath`先清空Data Cache，后 re-render
 - 就算重新部署，Data Cache 也不会清除，是跨部署共享的
 
@@ -432,7 +694,7 @@ let data = await fetch('https://api.vercel.app/blog', { cache: 'no-store' })
 
 #### 有效时间
 永久有效
-#### 刷新方法
+#### 刷新方法(revalidate)
 - revalidation 或禁用 Data Cache 会使 Full Route Cache 刷新（因为 render 依赖数据，所以 Nextjs 会在 Data Cache 更新时同步更新 Full Route Cache）
 - 重新部署（不同于 Data Cache)
 #### 禁用方法
@@ -458,7 +720,7 @@ let data = await fetch('https://api.vercel.app/blog', { cache: 'no-store' })
 - Automatic Invalidation Period
 	- 默认预加载 (`prefetch={null}` 或未指定)：动态页面不缓存，静态页面缓存5分钟
 	- 完全预取预加载(`prefetch={true}` 或 `router.prefetch`)：静态和动态页面均缓存为5分钟
-#### 刷新方法
+#### 刷新方法(revalidate)
  - 在 Server Action 中使用 `revalidatePath`和 `revalidateTag`
  - 使用 `router.refresh`
 #### 禁用方法
