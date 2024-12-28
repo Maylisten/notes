@@ -732,6 +732,7 @@ let data = await fetch('https://api.vercel.app/blog', { cache: 'no-store' })
 - 动态渲染和静态渲染都会使用 Client Route Cache，并且比 Full Route Cache 优先级更高
 - 页面刷新会一次性清空所有的 Client Route Cache，而自动失效时间计算是各个路由段相互独立的
 - Prefetch 时默认缓存的是 Loading 而不是 Page
+- Client Route Cache 只缓存了 RSC Payload，并没有缓存 HTML，这是因为只有页面首次进入或重新刷新时，服务端才会渲染静态的 HTML 给前端，而 Client Route Cache 只作用于后续的子路由导航，所以此时 HTML 和 Client Component JavaScript bundle 都已经有了，缺的只有 RSC Payload
 
 ### Data Cache 和 Route Cache
 #### Data Cache and Full Route Cache
@@ -740,3 +741,5 @@ let data = await fetch('https://api.vercel.app/blog', { cache: 'no-store' })
 #### Data Cache and Client-side Router cache
 - 在 Server Action 中，可以使用`revalidatePath`或`revalidateTag`立即清除Data Cache 和 Client Router Cache
 - 在 Route Handler 中，因为 Route Handler 与路由无关，更新或取消 Data Cache 不会立刻是清除 Router Cache，除非刷新网页或者 Client Router Cache 过期
+
+
